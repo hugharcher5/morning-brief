@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Daily Morning Briefing -> ElevenLabs voice + Resend email.
+Finance/markets-focused version.
 
-Runs on GitHub Actions (see .github/workflows/daily-briefing.yml).
-Gathers free public headlines, writes a spoken-style transcript, converts
-it to an mp3 using ElevenLabs, then emails the mp3 + transcript via Resend.
+Runs on GitHub Actions (see .github/workflows/briefing.yml).
+Gathers free public headlines + free market quotes, writes a spoken-style
+transcript, converts it to an mp3 using ElevenLabs, then emails the mp3 +
+transcript via Resend.
 
-Required secrets (set as GitHub repo secrets, Settings -> Secrets and
-variables -> Actions):
+Required secrets (GitHub repo Settings -> Secrets and variables -> Actions):
     ELEVENLABS_API_KEY
     RESEND_API_KEY
 
@@ -31,27 +32,45 @@ RESEND_API_KEY = os.environ["RESEND_API_KEY"]
 TO_EMAIL = "archerh2005@gmail.com"
 FROM_EMAIL = "onboarding@resend.dev"
 VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs default "Rachel" voice.
-# Browse voices at elevenlabs.io -> Voice Library, click one, copy its
-# Voice ID from the "..." menu, and paste it here to change the voice.
 # -------------------------------
 
+MAX_ITEMS_PER_SOURCE = 2
+
+# ---------------------------------------------------------------------------
+# Free RSS sources, reorganized around markets/economy/policy/geopolitics.
+# ---------------------------------------------------------------------------
 RSS_SOURCES = {
-    "New York Post": "https://nypost.com/feed/",
+    "CNBC Top News": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "CNBC Economy": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+    "MarketWatch Top Stories": "http://feeds.marketwatch.com/marketwatch/topstories/",
+    "Fed Press Releases": "https://www.federalreserve.gov/feeds/press_all.xml",
     "BBC World": "http://feeds.bbci.co.uk/news/world/rss.xml",
+    "BBC Politics": "http://feeds.bbci.co.uk/news/politics/rss.xml",
     "BBC Business": "http://feeds.bbci.co.uk/news/business/rss.xml",
-    "NYT Front Page": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-    "NYT Business": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
-    "WSJ World News": "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
-    "WSJ Markets": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
-    "Financial Times": "https://www.ft.com/rss/home",
+    "RTE Business": "https://www.rte.ie/news/rss/business-headlines.xml",
     "RTE News": "https://www.rte.ie/news/rss/news-headlines.xml",
-    "TheJournal.ie": "https://www.thejournal.ie/feed/",
-    "Politico": "https://www.politico.com/rss/politics-news.xml",
-    "Axios": "https://api.axios.com/feed/",
+    "CNBC Asia Markets": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
+}
+
+# ---------------------------------------------------------------------------
+# Free market quotes via Yahoo Finance's public chart endpoint (no API key).
+# ---------------------------------------------------------------------------
+TICKERS = {
+    "S&P 500": "^GSPC",
+    "Nasdaq": "^IXIC",
+    "Dow Jones": "^DJI",
+    "Gold": "GC=F",
+    "Euro/Dollar": "EURUSD=X",
+    "Pound/Dollar": "GBPUSD=X",
+}
+
+ASIA_TICKERS = {
+    "Nikkei 225 (Japan)": "^N225",
+    "Hang Seng (Hong Kong)": "^HSI",
 }
 
 
-def fetch_rss(name, url, max_items=2):
+def fetch_rss(name, url, max_items=MAX_ITEMS_PER_SOURCE):
     try:
         feed = feedparser.parse(url, request_headers={"User-Agent": "Mozilla/5.0"})
         if feed.bozo and not feed.entries:
@@ -59,7 +78,7 @@ def fetch_rss(name, url, max_items=2):
         items = []
         for entry in feed.entries[:max_items]:
             title = entry.get("title", "(no title)")
-            summary = (entry.get("summary", "") or entry.get("description", ""))[:300]
+            summary = (entry.get("summary", "") or entry.get("description", ""))[:220]
             items.append({"title": title, "summary": summary})
         return items
     except Exception as e:
@@ -79,64 +98,123 @@ def summarize(items):
     return " ".join(parts)
 
 
+def fetch_quote(symbol):
+    """Free, no-key quote via Yahoo Finance's public chart endpoint."""
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        meta = data["chart"]["result"][0]["meta"]
+        price = meta.get("regularMarketPrice")
+        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+        if price is None or prev is None:
+            return None
+        pct = (price - prev) / prev * 100
+        return {"price": price, "pct": pct}
+    except Exception as e:
+        print(f"  [skip] quote {symbol}: {e}", file=sys.stderr)
+        return None
+
+
+def describe_move(name, symbol, decimals=2):
+    q = fetch_quote(symbol)
+    if not q:
+        return None
+    direction = "up" if q["pct"] >= 0 else "down"
+    return f"{name} is {direction} {abs(q['pct']):.1f}% to {q['price']:.{decimals}f}"
+
+
 def build_transcript():
-    """Assemble a flowing, spoken-style script from today's headlines.
-    Template-based (no extra LLM API needed) -- edit the phrasing below
-    freely to change the "voice" of the writing."""
+    lines = [
+        f"Good morning. Here's your markets and economy briefing for {TODAY.strftime('%A, %B %d')}.",
+        "",
+    ]
 
-    lines = [f"Good morning. Here's your reading briefing for {TODAY.strftime('%A, %B %d')}.", ""]
-    lines.append("Starting with the US desk.")
+    # ---------------- 1. US market indices + major movers ----------------
+    lines.append("Starting with the US markets.")
+    moves = []
+    for name, sym in [("The S&P 500", "^GSPC"), ("The Nasdaq", "^IXIC"), ("The Dow", "^DJI")]:
+        m = describe_move(name, sym, decimals=0)
+        if m:
+            moves.append(m)
+    gold = describe_move("Gold", "GC=F")
+    eur = describe_move("The euro against the dollar", "EURUSD=X", decimals=4)
+    gbp = describe_move("The pound against the dollar", "GBPUSD=X", decimals=4)
+    for m in [gold, eur, gbp]:
+        if m:
+            moves.append(m)
+    if moves:
+        lines.append(". ".join(moves) + ".")
 
-    nyp = summarize(fetch_rss("New York Post", RSS_SOURCES["New York Post"]))
-    if nyp:
-        lines.append(f"From the New York Post: {nyp}")
+    movers = summarize(fetch_rss("MarketWatch Top Stories", RSS_SOURCES["MarketWatch Top Stories"]))
+    if movers:
+        lines.append(f"MarketWatch flags: {movers}")
 
-    nyt = summarize(fetch_rss("NYT Front Page", RSS_SOURCES["NYT Front Page"], 2) +
-                     fetch_rss("NYT Business", RSS_SOURCES["NYT Business"], 2))
-    if nyt:
-        lines.append(f"The New York Times is covering: {nyt}")
+    cnbc = summarize(fetch_rss("CNBC Top News", RSS_SOURCES["CNBC Top News"]))
+    if cnbc:
+        lines.append(f"CNBC's top stories: {cnbc}")
 
-    wsj = summarize(fetch_rss("WSJ World News", RSS_SOURCES["WSJ World News"], 2) +
-                     fetch_rss("WSJ Markets", RSS_SOURCES["WSJ Markets"], 2))
-    if wsj:
-        lines.append(f"On markets, the Wall Street Journal reports: {wsj}")
-
-    ft = summarize(fetch_rss("Financial Times", RSS_SOURCES["Financial Times"]))
-    if ft:
-        lines.append(f"The Financial Times adds this on the international and markets side: {ft}")
-
-    if IS_WEEKEND:
-        bbc = summarize(fetch_rss("BBC World", RSS_SOURCES["BBC World"]))
-        if bbc:
-            lines.append(f"Since it's the weekend, here's the broader world roundup from the BBC: {bbc}")
-    else:
-        pol = summarize(fetch_rss("Politico", RSS_SOURCES["Politico"]))
-        if pol:
-            lines.append(f"In politics, Politico is reporting: {pol}")
-        axios = summarize(fetch_rss("Axios", RSS_SOURCES["Axios"]))
-        if axios:
-            lines.append(f"And Axios flags: {axios}")
-
+    # ---------------- 2. Geopolitical / political risk ----------------
     lines.append("")
-    lines.append("Now to the Dublin and EU desk.")
+    lines.append("On geopolitical and political risk.")
+    world = summarize(fetch_rss("BBC World", RSS_SOURCES["BBC World"]))
+    if world:
+        lines.append(f"From the BBC's world coverage: {world}")
+    us_pol = summarize(fetch_rss("BBC Politics", RSS_SOURCES["BBC Politics"]))
+    if us_pol:
+        lines.append(f"On the political side: {us_pol}")
 
+    # ---------------- 3. Fed / interest rates ----------------
+    lines.append("")
+    lines.append("On the Federal Reserve and interest rates.")
+    fed = summarize(fetch_rss("Fed Press Releases", RSS_SOURCES["Fed Press Releases"]))
+    if fed:
+        lines.append(f"The Fed's own press releases show: {fed}")
+    else:
+        lines.append("No new Fed press releases today.")
+    econ = summarize(fetch_rss("CNBC Economy", RSS_SOURCES["CNBC Economy"]))
+    if econ:
+        lines.append(f"On the broader economy, CNBC reports: {econ}")
+
+    # ---------------- 4. EU / UK economy ----------------
+    lines.append("")
+    lines.append("Now to the EU, UK, and Dublin side.")
+    biz = summarize(fetch_rss("BBC Business", RSS_SOURCES["BBC Business"]))
+    if biz:
+        lines.append(f"BBC Business covers: {biz}")
+    rte_biz = summarize(fetch_rss("RTE Business", RSS_SOURCES["RTE Business"]))
+    if rte_biz:
+        lines.append(f"On the Dublin side, RTE Business reports: {rte_biz}")
     rte = summarize(fetch_rss("RTE News", RSS_SOURCES["RTE News"]))
     if rte:
-        lines.append(f"RTE News is leading with: {rte}")
+        lines.append(f"RTE News adds: {rte}")
 
-    tj = summarize(fetch_rss("TheJournal.ie", RSS_SOURCES["TheJournal.ie"]))
-    if tj:
-        lines.append(f"TheJournal.ie adds: {tj}")
+    # ---------------- 5. Earnings calendar ----------------
+    lines.append("")
+    lines.append(
+        "On earnings: today's script doesn't pull a live earnings calendar, since "
+        "there's no reliable free source for that without an API key. Worth checking "
+        "a free calendar site like Nasdaq's earnings calendar if you want specifics "
+        "on what's reporting this week."
+    )
 
-    ftEurope = summarize(fetch_rss("Financial Times", RSS_SOURCES["Financial Times"], 2))
-    if ftEurope:
-        lines.append(f"On the European economic side, the Financial Times covers: {ftEurope}")
+    # ---------------- 6. Asia (brief) ----------------
+    lines.append("")
+    lines.append("Briefly on Asia.")
+    asia_moves = []
+    for name, sym in ASIA_TICKERS.items():
+        m = describe_move(name, sym, decimals=0)
+        if m:
+            asia_moves.append(m)
+    if asia_moves:
+        lines.append(". ".join(asia_moves) + ".")
+    asia_news = summarize(fetch_rss("CNBC Asia Markets", RSS_SOURCES["CNBC Asia Markets"]))
+    if asia_news:
+        lines.append(f"CNBC Asia adds: {asia_news}")
 
     lines.append("")
-    lines.append("That's the briefing for this morning. Full text access to the Irish "
-                  "Times, FT, WSJ, and Business Post remains available separately via "
-                  "your UCD Library subscriptions if you want to read the original "
-                  "coverage on any of today's stories.")
+    lines.append("That's the briefing for this morning.")
 
     return "\n\n".join(lines)
 
@@ -155,7 +233,7 @@ def text_to_speech(text):
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=120)
     resp.raise_for_status()
-    return resp.content  # raw mp3 bytes
+    return resp.content
 
 
 def send_email(transcript, audio_bytes):
@@ -168,7 +246,7 @@ def send_email(transcript, audio_bytes):
     payload = {
         "from": FROM_EMAIL,
         "to": [TO_EMAIL],
-        "subject": f"Morning Reading Briefing (audio) — {TODAY.strftime('%A, %B %d, %Y')}",
+        "subject": f"Morning Markets Briefing (audio) — {TODAY.strftime('%A, %B %d, %Y')}",
         "text": transcript,
         "attachments": [
             {
