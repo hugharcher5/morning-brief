@@ -150,7 +150,7 @@ def text_to_speech(text):
     }
     payload = {
         "text": text,
-        "model_id": "eleven_multilingual_v2",
+        "model_id": "eleven_flash_v2_latest",
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=120)
