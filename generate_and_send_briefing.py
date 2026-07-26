@@ -31,7 +31,7 @@ RESEND_API_KEY = os.environ["RESEND_API_KEY"]
 # --- EDIT THESE THREE LINES ---
 TO_EMAIL = "archerh2005@gmail.com"
 FROM_EMAIL = "onboarding@resend.dev"
-VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs default "Rachel" voice.
+VOICE_ID = "UgBBYS2sOqTuMpoF3BR0"  # ElevenLabs Mark
 # -------------------------------
 
 MAX_ITEMS_PER_SOURCE = 2
