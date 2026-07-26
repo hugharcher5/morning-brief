@@ -1,0 +1,31 @@
+name: Daily Morning Briefing
+
+on:
+  schedule:
+    # 6:00 UTC = 7am Irish Standard Time (winter) / 6:00 UTC = 6am Irish Summer
+    # Time in summer. GitHub Actions cron is UTC-only and doesn't shift for
+    # daylight saving -- adjust this by +/- 1 hour if the send time drifts
+    # noticeably after clocks change in March/October.
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab too
+
+jobs:
+  run-briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate and send briefing
+        env:
+          ELEVENLABS_API_KEY: ${{sk_d242f3660799648dd19494d24127afc5f61508d06b8a563d}}
+          RESEND_API_KEY: ${{re_JETc8rtf_JthS8bjejuPGq9mNwpkzhvVt}}
+        run: python3 generate_and_send_briefing.py
