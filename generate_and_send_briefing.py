@@ -51,7 +51,7 @@ RSS_SOURCES = {
 }
 
 
-def fetch_rss(name, url, max_items=3):
+def fetch_rss(name, url, max_items=2):
     try:
         feed = feedparser.parse(url, request_headers={"User-Agent": "Mozilla/5.0"})
         if feed.bozo and not feed.entries:
