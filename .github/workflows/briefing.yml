@@ -26,6 +26,6 @@ jobs:
 
       - name: Generate and send briefing
         env:
-          ELEVENLABS_API_KEY: ${{sk_d242f3660799648dd19494d24127afc5f61508d06b8a563d}}
-          RESEND_API_KEY: ${{re_JETc8rtf_JthS8bjejuPGq9mNwpkzhvVt}}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: python3 generate_and_send_briefing.py
