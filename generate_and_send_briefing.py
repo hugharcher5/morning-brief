@@ -31,7 +31,7 @@ RESEND_API_KEY = os.environ["RESEND_API_KEY"]
 # --- EDIT THESE THREE LINES ---
 TO_EMAIL = "archerh2005@gmail.com"
 FROM_EMAIL = "onboarding@resend.dev"
-VOICE_ID = "UgBBYS2sOqTuMpoF3BR0"  # ElevenLabs Mark
+VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs default "Rachel" voice.
 # -------------------------------
 
 MAX_ITEMS_PER_SOURCE = 2
@@ -117,12 +117,64 @@ def fetch_quote(symbol):
         return None
 
 
-def describe_move(name, symbol, decimals=2):
+def describe_move(name, symbol):
+    """Qualitative description of a move -- no exact prices/percentages,
+    since those aren't useful to hear read aloud."""
     q = fetch_quote(symbol)
     if not q:
         return None
-    direction = "up" if q["pct"] >= 0 else "down"
-    return f"{name} is {direction} {abs(q['pct']):.1f}% to {q['price']:.{decimals}f}"
+    pct = q["pct"]
+    if abs(pct) < 0.15:
+        return f"{name} is little changed"
+    direction = "higher" if pct >= 0 else "lower"
+    magnitude = abs(pct)
+    if magnitude < 0.5:
+        adverb = "slightly"
+    elif magnitude < 1.5:
+        adverb = "solidly"
+    elif magnitude < 3:
+        adverb = "sharply"
+    else:
+        adverb = "dramatically"
+    return f"{name} is {adverb} {direction}"
+
+
+def fetch_earnings():
+    """Free earnings calendar via Nasdaq's public (unofficial, no-key)
+    calendar endpoint. Sorted by market cap where available so the
+    biggest names surface first. Returns None if the endpoint fails or
+    has nothing for today -- Nasdaq occasionally blocks non-browser
+    requests, so this is best-effort, not guaranteed."""
+    try:
+        url = f"https://api.nasdaq.com/api/calendar/earnings?date={TODAY.isoformat()}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Accept": "application/json",
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        rows = (data.get("data") or {}).get("rows") or []
+        if not rows:
+            return None
+
+        def market_cap_value(row):
+            raw = (row.get("marketCap") or "").replace("$", "").replace(",", "")
+            try:
+                return float(raw)
+            except ValueError:
+                return 0.0
+
+        rows.sort(key=market_cap_value, reverse=True)
+        names = []
+        for r in rows[:5]:
+            name = r.get("name") or r.get("symbol")
+            if name:
+                names.append(name)
+        return names or None
+    except Exception as e:
+        print(f"  [skip] earnings calendar: {e}", file=sys.stderr)
+        return None
 
 
 def build_transcript():
@@ -135,12 +187,12 @@ def build_transcript():
     lines.append("Starting with the US markets.")
     moves = []
     for name, sym in [("The S&P 500", "^GSPC"), ("The Nasdaq", "^IXIC"), ("The Dow", "^DJI")]:
-        m = describe_move(name, sym, decimals=0)
+        m = describe_move(name, sym)
         if m:
             moves.append(m)
     gold = describe_move("Gold", "GC=F")
-    eur = describe_move("The euro against the dollar", "EURUSD=X", decimals=4)
-    gbp = describe_move("The pound against the dollar", "GBPUSD=X", decimals=4)
+    eur = describe_move("The euro against the dollar", "EURUSD=X")
+    gbp = describe_move("The pound against the dollar", "GBPUSD=X")
     for m in [gold, eur, gbp]:
         if m:
             moves.append(m)
@@ -149,7 +201,7 @@ def build_transcript():
 
     movers = summarize(fetch_rss("MarketWatch Top Stories", RSS_SOURCES["MarketWatch Top Stories"]))
     if movers:
-        lines.append(f"MarketWatch flags: {movers}")
+        lines.append(f"What's driving that, per MarketWatch: {movers}")
 
     cnbc = summarize(fetch_rss("CNBC Top News", RSS_SOURCES["CNBC Top News"]))
     if cnbc:
@@ -192,19 +244,21 @@ def build_transcript():
 
     # ---------------- 5. Earnings calendar ----------------
     lines.append("")
-    lines.append(
-        "On earnings: today's script doesn't pull a live earnings calendar, since "
-        "there's no reliable free source for that without an API key. Worth checking "
-        "a free calendar site like Nasdaq's earnings calendar if you want specifics "
-        "on what's reporting this week."
-    )
+    earnings = fetch_earnings()
+    if earnings:
+        lines.append("On earnings, reporting today: " + ", ".join(earnings) + ".")
+    else:
+        lines.append(
+            "No earnings calendar data came through today -- worth checking "
+            "Nasdaq's free earnings calendar directly if you want specifics."
+        )
 
     # ---------------- 6. Asia (brief) ----------------
     lines.append("")
     lines.append("Briefly on Asia.")
     asia_moves = []
     for name, sym in ASIA_TICKERS.items():
-        m = describe_move(name, sym, decimals=0)
+        m = describe_move(name, sym)
         if m:
             asia_moves.append(m)
     if asia_moves:
