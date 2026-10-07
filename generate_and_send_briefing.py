@@ -11,8 +11,9 @@ transcript via Resend.
 Required secrets (GitHub repo Settings -> Secrets and variables -> Actions):
     ELEVENLABS_API_KEY
     RESEND_API_KEY
+    TO_EMAIL            where the briefing is sent
 
-Edit TO_EMAIL / FROM_EMAIL / VOICE_ID below before first use.
+Optional: edit FROM_EMAIL / VOICE_ID below.
 """
 
 import os
@@ -28,8 +29,9 @@ IS_WEEKEND = TODAY.weekday() >= 5
 ELEVENLABS_API_KEY = os.environ["ELEVENLABS_API_KEY"]
 RESEND_API_KEY = os.environ["RESEND_API_KEY"]
 
-# --- EDIT THESE THREE LINES ---
-TO_EMAIL = "archerh2005@gmail.com"
+TO_EMAIL = os.environ["TO_EMAIL"]
+
+# --- EDIT THESE TWO LINES ---
 FROM_EMAIL = "onboarding@resend.dev"
 VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs default "Rachel" voice.
 # -------------------------------
