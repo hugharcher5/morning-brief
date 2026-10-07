@@ -1,326 +1,349 @@
 #!/usr/bin/env python3
 """
-Daily Morning Briefing -> ElevenLabs voice + Resend email.
-Finance/markets-focused version.
+Morning Brief: a personal news briefing delivered as a voice note.
 
-Runs on GitHub Actions (see .github/workflows/briefing.yml).
-Gathers free public headlines + free market quotes, writes a spoken-style
-transcript, converts it to an mp3 using ElevenLabs, then emails the mp3 +
-transcript via Resend.
+1. Gathers the day's headlines from free RSS feeds and market moves from
+   Yahoo Finance's free chart endpoint.
+2. Turns them into a spoken script. With ANTHROPIC_API_KEY set, Claude writes
+   a natural, flowing 10 to 15 minute script; without it, a simple template
+   reads the headlines out section by section.
+3. Reads the script aloud with ElevenLabs and saves an MP3.
+4. Emails the MP3 and transcript with Resend, if RESEND_API_KEY and TO_EMAIL
+   are set.
 
-Required secrets (GitHub repo Settings -> Secrets and variables -> Actions):
-    ELEVENLABS_API_KEY
-    RESEND_API_KEY
-    TO_EMAIL            where the briefing is sent
+Environment variables (GitHub: Settings -> Secrets and variables -> Actions):
+    ELEVENLABS_API_KEY   required for audio
+    RESEND_API_KEY       optional, needed to email the briefing
+    TO_EMAIL             optional, where to email it
+    ANTHROPIC_API_KEY    optional, makes the script flow naturally
+    ELEVENLABS_VOICE_ID  optional, defaults to VOICE_ID below
+    ELEVENLABS_MODEL     optional, defaults to ELEVENLABS_MODEL below
 
-Optional: edit FROM_EMAIL / VOICE_ID below.
+Usage:
+    python generate_and_send_briefing.py                 # full run
+    python generate_and_send_briefing.py --dry-run       # print the script only, no API calls
+    python generate_and_send_briefing.py --script my.txt # voice a script you wrote yourself
+    python generate_and_send_briefing.py --out brief.mp3 --no-email
 """
 
-import os
-import sys
+import argparse
 import base64
 import datetime
+import html
+import os
+import re
+import sys
+
 import feedparser
 import requests
 
 TODAY = datetime.date.today()
-IS_WEEKEND = TODAY.weekday() >= 5
 
-ELEVENLABS_API_KEY = os.environ["ELEVENLABS_API_KEY"]
-RESEND_API_KEY = os.environ["RESEND_API_KEY"]
-
-TO_EMAIL = os.environ["TO_EMAIL"]
-
-# --- EDIT THESE TWO LINES ---
-FROM_EMAIL = "onboarding@resend.dev"
-VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs default "Rachel" voice.
-# -------------------------------
-
-MAX_ITEMS_PER_SOURCE = 2
-
+# --- Settings you may want to change ---------------------------------------
+FROM_EMAIL = "onboarding@resend.dev"   # Resend's test sender; use your own verified domain later
+VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # ElevenLabs "Rachel"
+ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+CLAUDE_MODEL = "claude-opus-5-5"
+ITEMS_PER_SOURCE = 4
+TARGET_WORDS = "1,600 to 2,000"   # roughly 10 to 15 minutes read aloud
 # ---------------------------------------------------------------------------
-# Free RSS sources, reorganized around markets/economy/policy/geopolitics.
-# ---------------------------------------------------------------------------
-RSS_SOURCES = {
-    "CNBC Top News": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-    "CNBC Economy": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
-    "MarketWatch Top Stories": "http://feeds.marketwatch.com/marketwatch/topstories/",
-    "Fed Press Releases": "https://www.federalreserve.gov/feeds/press_all.xml",
-    "BBC World": "http://feeds.bbci.co.uk/news/world/rss.xml",
-    "BBC Politics": "http://feeds.bbci.co.uk/news/politics/rss.xml",
-    "BBC Business": "http://feeds.bbci.co.uk/news/business/rss.xml",
-    "RTE Business": "https://www.rte.ie/news/rss/business-headlines.xml",
-    "RTE News": "https://www.rte.ie/news/rss/news-headlines.xml",
-    "CNBC Asia Markets": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
-}
 
-# ---------------------------------------------------------------------------
-# Free market quotes via Yahoo Finance's public chart endpoint (no API key).
-# ---------------------------------------------------------------------------
-TICKERS = {
-    "S&P 500": "^GSPC",
-    "Nasdaq": "^IXIC",
-    "Dow Jones": "^DJI",
-    "Gold": "GC=F",
-    "Euro/Dollar": "EURUSD=X",
-    "Pound/Dollar": "GBPUSD=X",
-}
+# Each section: a heading for the script, then its feeds. Edit freely to make
+# the briefing your own; the order here is the order it's read in.
+SECTIONS = [
+    ("Markets", [
+        ("CNBC Top News", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
+        ("MarketWatch", "http://feeds.marketwatch.com/marketwatch/topstories/"),
+    ]),
+    ("The economy and interest rates", [
+        ("CNBC Economy", "https://www.cnbc.com/id/20910258/device/rss/rss.html"),
+        ("Federal Reserve", "https://www.federalreserve.gov/feeds/press_all.xml"),
+    ]),
+    ("AI and technology", [
+        ("TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/"),
+        ("The Verge AI", "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),
+    ]),
+    ("US news", [
+        ("BBC US and Canada", "http://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml"),
+        ("NPR", "https://feeds.npr.org/1001/rss.xml"),
+    ]),
+    ("World and geopolitics", [
+        ("BBC World", "http://feeds.bbci.co.uk/news/world/rss.xml"),
+    ]),
+    ("Europe and the UK", [
+        ("BBC Europe", "http://feeds.bbci.co.uk/news/world/europe/rss.xml"),
+        ("BBC Business", "http://feeds.bbci.co.uk/news/business/rss.xml"),
+        ("BBC Politics", "http://feeds.bbci.co.uk/news/politics/rss.xml"),
+    ]),
+    ("Ireland", [
+        ("RTE News", "https://www.rte.ie/news/rss/news-headlines.xml"),
+        ("RTE Business", "https://www.rte.ie/news/rss/business-headlines.xml"),
+    ]),
+    ("Asia", [
+        ("CNBC Asia", "https://www.cnbc.com/id/19832390/device/rss/rss.html"),
+    ]),
+]
 
-ASIA_TICKERS = {
-    "Nikkei 225 (Japan)": "^N225",
-    "Hang Seng (Hong Kong)": "^HSI",
-}
+MARKETS = [
+    ("The S&P 500", "^GSPC"), ("The Nasdaq", "^IXIC"), ("The Dow", "^DJI"),
+    ("Gold", "GC=F"), ("Oil", "CL=F"),
+    ("The euro against the dollar", "EURUSD=X"), ("The pound against the dollar", "GBPUSD=X"),
+    ("Japan's Nikkei", "^N225"), ("Hong Kong's Hang Seng", "^HSI"),
+]
+
+# Routine notices that make dull listening
+SKIP_TITLES = re.compile(
+    r"approval of application|announces approval|enforcement action|termination of enforcement"
+    r"|minutes of the board|agenda|discount rate", re.I)
+
+UA = {"User-Agent": "Mozilla/5.0 (morning-brief; +https://github.com/hugharcher5/morning-brief)"}
 
 
-def fetch_rss(name, url, max_items=MAX_ITEMS_PER_SOURCE):
+def clean(text):
+    """Strip HTML tags and entities from feed text and tidy the whitespace."""
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fetch_feed(name, url):
     try:
-        feed = feedparser.parse(url, request_headers={"User-Agent": "Mozilla/5.0"})
+        feed = feedparser.parse(url, request_headers=UA)
         if feed.bozo and not feed.entries:
             raise ValueError(feed.bozo_exception)
-        items = []
-        for entry in feed.entries[:max_items]:
-            title = entry.get("title", "(no title)")
-            summary = (entry.get("summary", "") or entry.get("description", ""))[:220]
-            items.append({"title": title, "summary": summary})
-        return items
-    except Exception as e:
+    except Exception as e:  # one broken feed shouldn't stop the briefing
         print(f"  [skip] {name}: {e}", file=sys.stderr)
         return []
+    stories = []
+    for entry in feed.entries:
+        title = clean(entry.get("title"))
+        if not title or SKIP_TITLES.search(title):
+            continue
+        summary = clean(entry.get("summary") or entry.get("description"))
+        if summary.lower().startswith(title.lower()):
+            summary = summary[len(title):].strip(" -:")
+        stories.append({"source": name, "title": title, "summary": summary[:300]})
+        if len(stories) >= ITEMS_PER_SOURCE:
+            break
+    return stories
 
 
-def summarize(items):
-    if not items:
-        return None
-    parts = []
-    for it in items:
-        line = it["title"]
-        if it["summary"]:
-            line += f" -- {it['summary']}"
-        parts.append(line)
-    return " ".join(parts)
-
-
-def fetch_quote(symbol):
-    """Free, no-key quote via Yahoo Finance's public chart endpoint."""
+def fetch_move(name, symbol):
+    """Describe a market move in words; numbers are hard to follow by ear."""
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        resp = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                            headers=UA, timeout=10)
         resp.raise_for_status()
-        data = resp.json()
-        meta = data["chart"]["result"][0]["meta"]
-        price = meta.get("regularMarketPrice")
-        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
-        if price is None or prev is None:
+        meta = resp.json()["chart"]["result"][0]["meta"]
+        price, prev = meta.get("regularMarketPrice"), meta.get("chartPreviousClose") or meta.get("previousClose")
+        if price is None or not prev:
             return None
-        pct = (price - prev) / prev * 100
-        return {"price": price, "pct": pct}
     except Exception as e:
         print(f"  [skip] quote {symbol}: {e}", file=sys.stderr)
         return None
-
-
-def describe_move(name, symbol):
-    """Qualitative description of a move -- no exact prices/percentages,
-    since those aren't useful to hear read aloud."""
-    q = fetch_quote(symbol)
-    if not q:
-        return None
-    pct = q["pct"]
+    pct = (price - prev) / prev * 100
     if abs(pct) < 0.15:
         return f"{name} is little changed"
-    direction = "higher" if pct >= 0 else "lower"
-    magnitude = abs(pct)
-    if magnitude < 0.5:
-        adverb = "slightly"
-    elif magnitude < 1.5:
-        adverb = "solidly"
-    elif magnitude < 3:
-        adverb = "sharply"
-    else:
-        adverb = "dramatically"
-    return f"{name} is {adverb} {direction}"
+    size = "slightly" if abs(pct) < 0.5 else "solidly" if abs(pct) < 1.5 else "sharply" if abs(pct) < 3 else "dramatically"
+    return f"{name} is {size} {'higher' if pct > 0 else 'lower'}"
 
 
 def fetch_earnings():
-    """Free earnings calendar via Nasdaq's public (unofficial, no-key)
-    calendar endpoint. Sorted by market cap where available so the
-    biggest names surface first. Returns None if the endpoint fails or
-    has nothing for today -- Nasdaq occasionally blocks non-browser
-    requests, so this is best-effort, not guaranteed."""
+    """Biggest companies reporting today, from Nasdaq's public calendar (best effort)."""
     try:
-        url = f"https://api.nasdaq.com/api/calendar/earnings?date={TODAY.isoformat()}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-            "Accept": "application/json",
-        }
-        resp = requests.get(url, headers=headers, timeout=10)
+        resp = requests.get(f"https://api.nasdaq.com/api/calendar/earnings?date={TODAY.isoformat()}",
+                            headers={**UA, "Accept": "application/json"}, timeout=10)
         resp.raise_for_status()
-        data = resp.json()
-        rows = (data.get("data") or {}).get("rows") or []
-        if not rows:
-            return None
-
-        def market_cap_value(row):
-            raw = (row.get("marketCap") or "").replace("$", "").replace(",", "")
-            try:
-                return float(raw)
-            except ValueError:
-                return 0.0
-
-        rows.sort(key=market_cap_value, reverse=True)
-        names = []
-        for r in rows[:5]:
-            name = r.get("name") or r.get("symbol")
-            if name:
-                names.append(name)
-        return names or None
+        rows = ((resp.json().get("data") or {}).get("rows")) or []
     except Exception as e:
-        print(f"  [skip] earnings calendar: {e}", file=sys.stderr)
-        return None
+        print(f"  [skip] earnings: {e}", file=sys.stderr)
+        return []
+
+    def cap(row):
+        try:
+            return float((row.get("marketCap") or "0").replace("$", "").replace(",", ""))
+        except ValueError:
+            return 0.0
+
+    names = [re.sub(r"[,.]?\s*(Inc|Ltd|Corp|Corporation|Co|plc)\.?$", "", (r.get("name") or r.get("symbol") or "").strip())
+             for r in sorted(rows, key=cap, reverse=True)[:5]]
+    return [n for n in names if n]
 
 
-def build_transcript():
-    lines = [
-        f"Good morning. Here's your markets and economy briefing for {TODAY.strftime('%A, %B %d')}.",
-        "",
-    ]
+def gather():
+    """Collect everything the script needs, removing stories repeated across feeds."""
+    seen, sections = set(), []
+    for heading, feeds in SECTIONS:
+        stories = []
+        for name, url in feeds:
+            for s in fetch_feed(name, url):
+                key = re.sub(r"[^a-z0-9]", "", s["title"].lower())[:60]
+                if key not in seen:
+                    seen.add(key)
+                    stories.append(s)
+        sections.append((heading, stories))
+    moves = [m for m in (fetch_move(n, s) for n, s in MARKETS) if m]
+    return {"date": f"{TODAY:%A, %B} {TODAY.day}",
+            "moves": moves, "earnings": fetch_earnings(), "sections": sections}
 
-    # ---------------- 1. US market indices + major movers ----------------
-    lines.append("Starting with the US markets.")
-    moves = []
-    for name, sym in [("The S&P 500", "^GSPC"), ("The Nasdaq", "^IXIC"), ("The Dow", "^DJI")]:
-        m = describe_move(name, sym)
-        if m:
-            moves.append(m)
-    gold = describe_move("Gold", "GC=F")
-    eur = describe_move("The euro against the dollar", "EURUSD=X")
-    gbp = describe_move("The pound against the dollar", "GBPUSD=X")
-    for m in [gold, eur, gbp]:
-        if m:
-            moves.append(m)
-    if moves:
-        lines.append(". ".join(moves) + ".")
 
-    movers = summarize(fetch_rss("MarketWatch Top Stories", RSS_SOURCES["MarketWatch Top Stories"]))
-    if movers:
-        lines.append(f"What's driving that, per MarketWatch: {movers}")
+def notes_as_text(notes):
+    lines = [f"Date: {notes['date']}", "", "Market moves: " + "; ".join(notes["moves"])]
+    if notes["earnings"]:
+        lines.append("Reporting earnings today: " + ", ".join(notes["earnings"]))
+    for heading, stories in notes["sections"]:
+        lines += ["", f"## {heading}"]
+        lines += [f"- {s['title']} ({s['source']}): {s['summary']}" for s in stories] or ["- nothing new"]
+    return "\n".join(lines)
 
-    cnbc = summarize(fetch_rss("CNBC Top News", RSS_SOURCES["CNBC Top News"]))
-    if cnbc:
-        lines.append(f"CNBC's top stories: {cnbc}")
 
-    # ---------------- 2. Geopolitical / political risk ----------------
-    lines.append("")
-    lines.append("On geopolitical and political risk.")
-    world = summarize(fetch_rss("BBC World", RSS_SOURCES["BBC World"]))
-    if world:
-        lines.append(f"From the BBC's world coverage: {world}")
-    us_pol = summarize(fetch_rss("BBC Politics", RSS_SOURCES["BBC Politics"]))
-    if us_pol:
-        lines.append(f"On the political side: {us_pol}")
+def template_script(notes):
+    """Fallback script with no AI: reads headlines out in order."""
+    parts = [f"Good morning. Here's your briefing for {notes['date']}."]
+    if notes["moves"]:
+        parts.append("First, the markets. " + ". ".join(notes["moves"]) + ".")
+    if notes["earnings"]:
+        parts.append("Reporting earnings today: " + ", ".join(notes["earnings"]) + ".")
+    for heading, stories in notes["sections"]:
+        if stories:
+            body = " ".join(f"{s['title']}. {s['summary']}".strip() for s in stories)
+            parts.append(f"{heading}. {body}")
+    parts.append("That's your briefing for this morning. Have a good day.")
+    return "\n\n".join(parts)
 
-    # ---------------- 3. Fed / interest rates ----------------
-    lines.append("")
-    lines.append("On the Federal Reserve and interest rates.")
-    fed = summarize(fetch_rss("Fed Press Releases", RSS_SOURCES["Fed Press Releases"]))
-    if fed:
-        lines.append(f"The Fed's own press releases show: {fed}")
-    else:
-        lines.append("No new Fed press releases today.")
-    econ = summarize(fetch_rss("CNBC Economy", RSS_SOURCES["CNBC Economy"]))
-    if econ:
-        lines.append(f"On the broader economy, CNBC reports: {econ}")
 
-    # ---------------- 4. EU / UK economy ----------------
-    lines.append("")
-    lines.append("Now to the EU, UK, and Dublin side.")
-    biz = summarize(fetch_rss("BBC Business", RSS_SOURCES["BBC Business"]))
-    if biz:
-        lines.append(f"BBC Business covers: {biz}")
-    rte_biz = summarize(fetch_rss("RTE Business", RSS_SOURCES["RTE Business"]))
-    if rte_biz:
-        lines.append(f"On the Dublin side, RTE Business reports: {rte_biz}")
-    rte = summarize(fetch_rss("RTE News", RSS_SOURCES["RTE News"]))
-    if rte:
-        lines.append(f"RTE News adds: {rte}")
+def claude_script(notes):
+    """Have Claude turn the notes into a natural spoken script."""
+    import anthropic
 
-    # ---------------- 5. Earnings calendar ----------------
-    lines.append("")
-    earnings = fetch_earnings()
-    if earnings:
-        lines.append("On earnings, reporting today: " + ", ".join(earnings) + ".")
-    else:
-        lines.append(
-            "No earnings calendar data came through today -- worth checking "
-            "Nasdaq's free earnings calendar directly if you want specifics."
-        )
+    system = (
+        "You write a personal morning news briefing that is read aloud by a text-to-speech voice "
+        "while the listener commutes to work. Write it the way a good radio presenter speaks: warm, "
+        "plain and conversational, with smooth transitions between stories and a short line of "
+        "context on why each one matters. Use only facts in the notes; never invent figures, quotes "
+        "or events. Describe market moves in words, not numbers. Write numbers, currencies and "
+        "abbreviations the way they should be said aloud. Output plain spoken text only: no "
+        "headings, bullet points, markdown, emoji or stage directions. Separate topics with blank lines."
+    )
+    prompt = (
+        f"Here are today's notes. Write a briefing of about {TARGET_WORDS} words, roughly 10 to 15 "
+        "minutes aloud. Follow the section order in the notes, skip anything trivial or repetitive, "
+        "open with a one-line greeting and the date, and close with a brief sign-off.\n\n"
+        + notes_as_text(notes)
+    )
+    client = anthropic.Anthropic()
+    response = client.beta.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=16000,
+        output_config={"effort": "medium"},
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+        system=system,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if response.stop_reason == "refusal":
+        raise RuntimeError("Claude declined to write the script")
+    text = "".join(b.text for b in response.content if b.type == "text").strip()
+    if not text:
+        raise RuntimeError(f"Claude returned no script (stop_reason={response.stop_reason})")
+    return text
 
-    # ---------------- 6. Asia (brief) ----------------
-    lines.append("")
-    lines.append("Briefly on Asia.")
-    asia_moves = []
-    for name, sym in ASIA_TICKERS.items():
-        m = describe_move(name, sym)
-        if m:
-            asia_moves.append(m)
-    if asia_moves:
-        lines.append(". ".join(asia_moves) + ".")
-    asia_news = summarize(fetch_rss("CNBC Asia Markets", RSS_SOURCES["CNBC Asia Markets"]))
-    if asia_news:
-        lines.append(f"CNBC Asia adds: {asia_news}")
 
-    lines.append("")
-    lines.append("That's the briefing for this morning.")
-
-    return "\n\n".join(lines)
+def chunks(text, limit=4000):
+    """Split the script at paragraph or sentence boundaries into TTS-sized pieces."""
+    pieces, current = [], ""
+    for para in re.split(r"\n\s*\n", text):
+        sentences = re.split(r"(?<=[.!?])\s+", para.strip()) if len(para) > limit else [para.strip()]
+        for s in sentences:
+            if current and len(current) + len(s) + 2 > limit:
+                pieces.append(current)
+                current = ""
+            current = f"{current}\n\n{s}".strip() if current else s
+    if current:
+        pieces.append(current)
+    return pieces
 
 
 def text_to_speech(text):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg",
-    }
-    payload = {
-        "text": text,
-        "model_id": "eleven_flash_v2",
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=120)
-    resp.raise_for_status()
-    return resp.content
+    """Voice the script with ElevenLabs, chunk by chunk, keeping the delivery continuous."""
+    key = os.environ.get("ELEVENLABS_API_KEY")
+    if not key:
+        sys.exit("ELEVENLABS_API_KEY is not set. Add your own key to make the audio.")
+    parts = chunks(text)
+    audio = b""
+    for i, part in enumerate(parts):
+        payload = {
+            "text": part,
+            "model_id": ELEVENLABS_MODEL,
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            # Context from either side keeps intonation smooth across the joins
+            "previous_text": parts[i - 1][-500:] if i else None,
+            "next_text": parts[i + 1][:500] if i + 1 < len(parts) else None,
+        }
+        resp = requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}?output_format=mp3_44100_128",
+            headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"},
+            json={k: v for k, v in payload.items() if v is not None},
+            timeout=300,
+        )
+        if resp.status_code != 200:
+            sys.exit(f"ElevenLabs error {resp.status_code}: {resp.text[:300]}")
+        audio += resp.content
+        print(f"  voiced part {i + 1} of {len(parts)}")
+    return audio
 
 
-def send_email(transcript, audio_bytes):
-    url = "https://api.resend.com/emails"
-    headers = {
-        "Authorization": f"Bearer {RESEND_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-    payload = {
-        "from": FROM_EMAIL,
-        "to": [TO_EMAIL],
-        "subject": f"Morning Markets Briefing (audio) — {TODAY.strftime('%A, %B %d, %Y')}",
-        "text": transcript,
-        "attachments": [
-            {
-                "filename": f"morning_briefing_{TODAY.isoformat()}.mp3",
-                "content": audio_b64,
-            }
-        ],
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    resp.raise_for_status()
-    print("Email sent:", resp.json())
+def send_email(script, audio):
+    key, to = os.environ.get("RESEND_API_KEY"), os.environ.get("TO_EMAIL")
+    if not (key and to):
+        print("RESEND_API_KEY or TO_EMAIL not set, so skipping the email.")
+        return
+    resp = requests.post(
+        "https://api.resend.com/emails",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={
+            "from": FROM_EMAIL,
+            "to": [to],
+            "subject": f"Morning Brief: {TODAY.strftime('%A, %B %d, %Y')}",
+            "text": script,
+            "attachments": [{"filename": f"morning_brief_{TODAY.isoformat()}.mp3",
+                             "content": base64.b64encode(audio).decode()}],
+        },
+        timeout=60,
+    )
+    if resp.status_code >= 300:
+        sys.exit(f"Resend error {resp.status_code}: {resp.text[:300]}")
+    print("Email sent.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dry-run", action="store_true", help="print the script and stop (no paid API calls)")
+    parser.add_argument("--script", help="voice this text file instead of generating a script")
+    parser.add_argument("--out", default=f"morning_brief_{TODAY.isoformat()}.mp3", help="where to save the MP3")
+    parser.add_argument("--no-email", action="store_true", help="save the MP3 but don't email it")
+    args = parser.parse_args()
+
+    if args.script:
+        script = open(args.script, encoding="utf-8").read().strip()
+    else:
+        notes = gather()
+        if os.environ.get("ANTHROPIC_API_KEY") and not args.dry_run:
+            script = claude_script(notes)
+        else:
+            script = template_script(notes)
+
+    print("----- SCRIPT -----\n" + script + "\n------------------")
+    print(f"{len(script.split())} words, about {len(script.split()) / 150:.0f} minutes aloud")
+    if args.dry_run:
+        return
+
+    audio = text_to_speech(script)
+    with open(args.out, "wb") as f:
+        f.write(audio)
+    print(f"Saved {args.out} ({len(audio) // 1024} KB)")
+    if not args.no_email:
+        send_email(script, audio)
 
 
 if __name__ == "__main__":
-    transcript = build_transcript()
-    print("----- TRANSCRIPT -----")
-    print(transcript)
-    print("----- GENERATING AUDIO -----")
-    audio = text_to_speech(transcript)
-    print(f"Got {len(audio)} bytes of audio.")
-    send_email(transcript, audio)
+    main()

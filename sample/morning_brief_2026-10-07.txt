@@ -1,0 +1,59 @@
+Good morning. It's Wednesday, the seventh of October, and this is your morning briefing. Grab a coffee, and let's get you caught up before you get to your desk.
+
+We'll start with the markets, because it's been a soft session. The S&P 500 and the Nasdaq are both slightly lower, and the Dow has had a tougher time of it, solidly lower. It's not just stocks, either. Gold is solidly lower, and so is oil. On currencies, the euro has slipped solidly against the dollar, and the pound is slightly weaker. Over in Asia, Japan's Nikkei is solidly lower, while Hong Kong's Hang Seng bucked the trend and edged slightly higher. So, a cautious mood across most of the board.
+
+A big part of that caution is inflation. The Fed's own survey of consumer expectations shows that people now expect inflation of three point nine percent over the next twelve months. That's the highest reading since May of twenty twenty-three. Expectations matter here, because when households expect prices to keep climbing, they tend to behave in ways that keep them climbing, and that makes the Fed's job harder. It's one to keep an eye on as we head toward the next rate decision.
+
+In company news, the trading app Webull had a rough day. A congressional committee says the platform isn't the ordinary American company it presents itself as, and that it exposes customer data to the risk of Chinese surveillance. The stock fell about eighteen percent on the news.
+
+And in a sign of just how much money is flowing into artificial intelligence, Apollo and a group of banks are in talks to help finance SpaceX's purchase of forty billion dollars' worth of Nvidia chips. That comes after SpaceX's record-breaking stock market debut in June. Since then, though, interest rates have sold off, and yields on SpaceX's bonds have risen, along with other AI-related debt. So investors are still lending, but they're asking for more in return.
+
+That theme came up at the top of the economic world too. The head of the International Monetary Fund, Kristalina Georgieva, says AI is both the hope and the hazard for world leaders. Her point is that the same technology that's lifting hopes for growth is also pushing up inflation and borrowing costs, and it's happening just as government debt levels have risen. It's a useful way to frame a lot of today's stories.
+
+Elsewhere, India's central bank has raised interest rates for the first time since twenty twenty-three, as inflation risks build there. Both HSBC and Goldman Sachs expect another rise in December.
+
+And from the Federal Reserve itself, a couple of things worth knowing. The Fed has finalised changes to its annual bank stress test, aimed at making it more transparent and reducing the swings in the capital banks have to hold as a result. It's also asked for public comment on two proposals to set up rules for stablecoin issuers that it supervises, under the GENIUS Act. Stablecoins are steadily moving from the fringes of finance into the regulated system, and this is another step in that direction.
+
+Now to AI and technology, where it's been a busy day.
+
+OpenAI is bringing new college planning tools to ChatGPT for Teens, the mode it introduced in August with extra safeguards and break reminders. The new College Planner pulls together application requirements, deadlines, to-do lists and financial aid steps for each school a student is looking at.
+
+Google has a couple of things going on. Google Labs is experimenting with an AI-powered platform called Playground, which lets people build simple browser games just by describing them in plain text. And in a more serious project, Google DeepMind, Meta and the AI drug discovery company Isomorphic Labs are together investing three hundred million dollars in an effort to build a "virtual cell", a computer model of a living cell that researchers could use to study and fight disease. The project is led by Biohub, a nonprofit biomedical research group.
+
+Meta, meanwhile, has brought its Muse app to the iPad. Muse is Meta's agentic AI tool, and it's spent several weeks as the top free app in Apple's App Store since launching about a month ago.
+
+On the startup side, Healthleap has raised thirty-eight million dollars for software that flags hospital patients who might need a closer look from their care team. That includes a seed round co-led by Sequoia Capital and First Round Capital, and a Series A led by Hummingbird Ventures.
+
+And two pieces that are worth a read if you have time later. Tony Fadell, often called the father of the iPod, says the first wave of AI gadgets failed because they didn't solve real problems, and the next generation will have to earn people's trust. And there's an interesting look at how AI could shake up food delivery. DoorDash processed nine hundred and seventy million orders last quarter and brought in four and a half billion dollars in revenue. A ten-person startup called Bites, with around three hundred restaurants signed up in the Bay Area, is tiny by comparison, but it's betting AI can change how the whole business works.
+
+Turning to the United States. With the midterm elections coming up in November, Republican candidates are walking a tightrope, deciding whether to put some distance between themselves and an unpopular president who still dominates their party. Healthcare is part of that picture. Checks from President Trump of five hundred dollars toward health costs are landing in millions of mailboxes, but polling shows Americans still don't trust Republicans on healthcare. Experts doubt the checks will change many minds, and some say they're likely illegal.
+
+There's also a report from the New York Times on Defense Secretary Pete Hegseth. Reporter Greg Jaffe says Hegseth has disproportionately blocked promotions for Black and female senior officers, and has been removing transgender people from the military.
+
+Just north of the border, Canada has paused plans to extend assisted dying to people whose only condition is mental illness. That change was due to take effect in March twenty twenty-seven, and it's now on hold indefinitely.
+
+In sport, the tennis star Coco Gauff says she's had a draining few days after receiving racist abuse online, before she went out in the fourth round of the China Open.
+
+Now to the wider world. In France, police have stopped using stun grenades after a boy's hand was blown off during student protests. Several groups had complained about police using disproportionate force against teenagers.
+
+In Israel, three years on from the attacks of the seventh of October, people are demanding accountability for the failures that day. Prime Minister Benjamin Netanyahu has refused to take personal responsibility or to order a state inquiry.
+
+And there's a story to watch in Russia. A worker at a Russian laboratory that researches plague has died, and there are fears the cause may have been pneumonic plague, the form that can spread between people. That's prompted calls for more transparency from Moscow, and President Trump says he'll raise it with Vladimir Putin.
+
+Over to Europe. In Ukraine, President Zelensky has condemned what he called vile, large-scale Russian attacks that killed twenty-four people. Rescue workers are still searching for residents after an apartment building in the town of Pryluky was destroyed.
+
+In British business, the high street chemist Boots has been sold to a Canadian billionaire family in a deal worth around seven billion pounds. Royal Mail plans to cut two and a half thousand jobs, mostly in head office and other roles away from the front line, by the end of twenty twenty-seven. Jaguar has finally unveiled its new electric car, two years after a rebrand that drew a storm of ridicule. It'll cost about a hundred and thirty thousand dollars, and it arrives as rivals like Ferrari and Bentley also push into electric. And in a notable legal story, five former bankers who were jailed for rigging interest rates have had their convictions overturned by the Court of Appeal.
+
+In UK politics, it's Conservative conference week. Kemi Badenoch told the party it's "coming back", and promised a Tory government would scrap inheritance tax on family homes. The party is united behind her, but it still trails both Labour and Reform in the polls. Reform, for its part, says an internal inquiry found it didn't break the law after undercover journalists recorded officials discussing a possible way to secure foreign donations.
+
+Closer to home now, and a few stories from Ireland. The fallout from Budget twenty twenty-seven continues. RTÉ's Director General has pushed back after the Minister for Media confirmed the broadcaster will get twenty million euro less than planned, because the minister isn't happy with the pace of reform. The public sector unions, meanwhile, say the money set aside for a new pay deal isn't enough to break the deadlock in their talks. And writing for RTÉ, David Murphy argues that while the public finances look healthy on the surface, with unemployment low and the economy humming along, there's an alarming truth buried in the detail of the Budget.
+
+On a health note, a new survey has found that women in Ireland wait an average of fourteen years for an endometriosis diagnosis, and for some it takes even longer.
+
+And at a cybersecurity conference in Dublin, a senior executive from OpenAI said the company has learned lessons from a recent hacking incident involving rogue AI models.
+
+Finally, a quick look at Asia, where two warnings stood out. Singapore's state investment fund, Temasek, says the biggest risk facing markets right now is the AI trade unwinding. And Singapore's foreign minister says President Trump isn't completely wrong that disruption in the Strait of Hormuz is really Asia's problem, since Asian economies rely so heavily on the energy shipped through it. Mr Trump has argued those countries should carry more of the burden of keeping the waterway open.
+
+So, if there's one thread running through this morning, it's AI. It's driving huge amounts of investment, it's helping to push up inflation and borrowing costs, and it's now being named as the biggest single risk to markets.
+
+That's your briefing for Wednesday. Have a great day, and I'll talk to you tomorrow morning.
