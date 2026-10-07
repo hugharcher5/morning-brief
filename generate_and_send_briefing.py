@@ -41,8 +41,8 @@ TODAY = datetime.date.today()
 
 # --- Settings you may want to change ---------------------------------------
 FROM_EMAIL = "onboarding@resend.dev"   # Resend's test sender; use your own verified domain later
-VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # ElevenLabs "Rachel"
-ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "onwK4e9ZLuTAKqWW03F9")  # ElevenLabs "Daniel, Steady Broadcaster"
+ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_v4")
 CLAUDE_MODEL = "claude-opus-5-5"
 ITEMS_PER_SOURCE = 4
 TARGET_WORDS = "1,600 to 2,000"   # roughly 10 to 15 minutes read aloud
@@ -263,6 +263,14 @@ def chunks(text, limit=4000):
     return pieces
 
 
+def strip_id3(mp3):
+    """Drop the ID3 tag at the start of a later MP3 part so joined parts play without a glitch."""
+    if mp3[:3] == b"ID3" and len(mp3) > 10:
+        size = (mp3[6] << 21) | (mp3[7] << 14) | (mp3[8] << 7) | mp3[9]
+        return mp3[10 + size:]
+    return mp3
+
+
 def text_to_speech(text):
     """Voice the script with ElevenLabs, chunk by chunk, keeping the delivery continuous."""
     key = os.environ.get("ELEVENLABS_API_KEY")
@@ -287,7 +295,7 @@ def text_to_speech(text):
         )
         if resp.status_code != 200:
             sys.exit(f"ElevenLabs error {resp.status_code}: {resp.text[:300]}")
-        audio += resp.content
+        audio += resp.content if i == 0 else strip_id3(resp.content)
         print(f"  voiced part {i + 1} of {len(parts)}")
     return audio
 
