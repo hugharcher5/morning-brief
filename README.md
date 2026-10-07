@@ -16,17 +16,17 @@ Every source is a free RSS feed or a free public quote endpoint, so the only cos
 
 ## How it runs
 
-A GitHub Actions workflow (`.github/workflows/briefing.yml`) runs the script every morning at 06:00 UTC. You can also run it by hand from the **Actions** tab with **Run workflow**.
+A GitHub Actions workflow (`.github/workflows/briefing.yml`) runs the script. Out of the box it only runs when you start it from the **Actions** tab with **Run workflow**. To get a briefing every morning at 06:00 UTC, uncomment the two `schedule` lines in that file.
 
 ## Set it up yourself
 
 1. Fork or copy this repo.
-2. Add three secrets under **Settings → Secrets and variables → Actions**:
+2. Add three secrets under **Settings → Secrets and variables → Actions**. You need your own ElevenLabs and Resend accounts: secrets are never copied when a repo is forked, so your copy can't use anyone else's keys or credits.
    - `ELEVENLABS_API_KEY`: from your ElevenLabs account.
    - `RESEND_API_KEY`: from your Resend account.
    - `TO_EMAIL`: the address the briefing should go to.
 3. Optionally change `VOICE_ID` in the script to any ElevenLabs voice you like.
-4. Run it once from the Actions tab to test.
+4. Run it once from the Actions tab to test, then switch on the daily schedule if you want it.
 
 ## Stack
 

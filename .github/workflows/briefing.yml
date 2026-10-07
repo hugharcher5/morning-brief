@@ -1,13 +1,12 @@
 name: Daily Morning Briefing
 
 on:
-  schedule:
-    # 6:00 UTC = 7am Irish Standard Time (winter) / 6:00 UTC = 6am Irish Summer
-    # Time in summer. GitHub Actions cron is UTC-only and doesn't shift for
-    # daylight saving -- adjust this by +/- 1 hour if the send time drifts
-    # noticeably after clocks change in March/October.
-    - cron: '0 6 * * *'
-  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab too
+  # Manual only by default, so nothing runs (or costs anything) until you choose to.
+  # To get a briefing every morning, uncomment the two schedule lines below.
+  # 6:00 UTC = 7am Irish Standard Time (winter) / 6am Irish Summer Time.
+  # schedule:
+  #   - cron: '0 6 * * *'
+  workflow_dispatch: {}   # run it from the Actions tab with "Run workflow"
 
 jobs:
   run-briefing:
