@@ -1,32 +1,33 @@
 # Morning Brief
 
-A personal news briefing that arrives as a 10 to 15 minute voice note every morning. It gathers the day's headlines and market moves, turns them into a natural spoken script, reads it aloud with an ElevenLabs voice, and emails you the MP3 and the transcript. I listened to it on the way to work.
+A personal morning briefing that arrives as a roughly 10 minute voice note. It opens with real market numbers, sized against a normal day, then the news I want to hear about. Claude writes the script, ElevenLabs reads it aloud, and the MP3 and transcript are emailed to you. I listen to it on the way to work.
 
-**Listen to a sample:** [`sample/morning_brief_2026-10-07.mp3`](sample/) (transcript alongside it).
+**Listen to a sample:** [`sample/morning_brief_2026-10-10.mp3`](sample/) (transcript alongside it).
 
 ## What's in a briefing
 
-The briefing follows the order of the `SECTIONS` list in the script, which you can edit to make it your own:
+It opens with "Morning Hugh. Here's your market news." and goes straight in.
 
-- **Markets:** the S&P 500, Nasdaq, Dow, gold, oil, EUR/USD, GBP/USD, the Nikkei and the Hang Seng, described in words rather than numbers, since numbers are hard to follow by ear. Plus the day's biggest earnings reports and market stories.
-- **The economy and interest rates:** CNBC Economy and the Federal Reserve's own announcements (routine notices are filtered out).
-- **AI and technology:** TechCrunch AI and The Verge AI.
-- **US news:** BBC US and Canada, and NPR.
-- **World and geopolitics:** BBC World.
-- **Europe and the UK:** BBC Europe, Business and Politics.
-- **Ireland:** RTÉ News and RTÉ Business.
-- **Asia:** CNBC Asia.
+**Markets** (`markets.py`): the US and Swiss 10-year yields, SOFR, €STR, the Dow, S&P 500, Nasdaq, MSCI World, MSCI Emerging Markets, Euro Stoxx 50, gold spot and EUR/USD. Prices are given in percent, yields and rates in basis points. Each move is compared with the standard deviation of that asset's daily moves over the past year:
 
-Every source is a free RSS feed or a free public market endpoint. Stories repeated across feeds are removed automatically.
+- under 1 standard deviation: one quick line
+- 1 to 1.5: a sentence
+- over 1.5: a notable move, and Claude searches the web for why it happened
+
+**Central banks and data:** the next Fed and ECB decision dates, what fed funds futures price for the next two Fed meetings, what money markets price for the ECB, and any recent US or euro area inflation, GDP, payrolls or unemployment releases.
+
+**News**, in order: markets and business, US, Europe and the EU, Ireland (in more detail), AI and software (including notable open-source releases), and a short world round-up. Edit the `SECTIONS` list in the script to make it your own.
+
+**Sources:** market data from CNBC, the New York Fed, the ECB Data Portal and fed funds futures via Yahoo Finance; releases from the BLS and BEA; news from CNBC, the FT, BBC, NPR, Politico Europe, Euronews, RTÉ, The Irish Times, the Irish Independent, TechCrunch, The Verge, Ars Technica, MIT Technology Review and Hacker News. All free, with no keys needed.
 
 ## How the script gets written
 
-- **With an Anthropic API key**, Claude (Opus 5.5) writes the script like a radio presenter: smooth transitions, a line of context on why each story matters, and only facts from the day's feeds.
-- **Without one**, a simple template reads the headlines out section by section. It works, but it doesn't flow.
+- **With an Anthropic API key**, Claude (Opus 5.5) writes the script like a sharp colleague talking you through the morning: direct, natural, with a line on why each story matters. It uses web search to explain big moves, check ECB pricing and fill in AI news, and only uses facts from the notes or its searches.
+- **Without one**, a simple template reads the numbers and headlines out. It works, but it doesn't flow.
 
 ## Cost
 
-Roughly 30 cents a run with ElevenLabs, plus a few cents for Claude if you use it. Resend's free tier covers the email.
+Roughly 30 to 40 cents a run with ElevenLabs, plus some cents for Claude and its web searches if you use it. Resend's free tier covers the email.
 
 ## Set it up yourself
 

@@ -2,11 +2,12 @@
 """
 Morning Brief: a personal news briefing delivered as a voice note.
 
-1. Gathers the day's headlines from free RSS feeds and market moves from
-   Yahoo Finance's free chart endpoint.
+1. Gathers market data (yields, overnight rates, indices, gold, EUR/USD, what's
+   priced for the Fed) with each move sized in standard deviations against the
+   past year (see markets.py), plus the day's headlines from free RSS feeds.
 2. Turns them into a spoken script. With ANTHROPIC_API_KEY set, Claude writes
-   a natural, flowing 10 to 15 minute script; without it, a simple template
-   reads the headlines out section by section.
+   it and searches the web for the reason behind any notable move; without it,
+   a simple template reads the numbers and headlines out.
 3. Reads the script aloud with ElevenLabs and saves an MP3.
 4. Emails the MP3 and transcript with Resend, if RESEND_API_KEY and TO_EMAIL
    are set.
@@ -37,6 +38,8 @@ import sys
 import feedparser
 import requests
 
+import markets
+
 TODAY = datetime.date.today()
 
 # --- Settings you may want to change ---------------------------------------
@@ -44,51 +47,50 @@ FROM_EMAIL = "onboarding@resend.dev"   # Resend's test sender; use your own veri
 VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "onwK4e9ZLuTAKqWW03F9")  # ElevenLabs "Daniel, Steady Broadcaster"
 ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_v4")
 CLAUDE_MODEL = "claude-opus-5-5"
-ITEMS_PER_SOURCE = 4
-TARGET_WORDS = "1,600 to 2,000"   # roughly 10 to 15 minutes read aloud
+ITEMS_PER_SOURCE = 5
+TARGET_WORDS = "1,500 to 1,700"   # about 10 minutes read aloud
 # ---------------------------------------------------------------------------
 
 # Each section: a heading for the script, then its feeds. Edit freely to make
 # the briefing your own; the order here is the order it's read in.
 SECTIONS = [
-    ("Markets", [
+    ("Markets and business", [
+        ("CNBC Markets", "https://www.cnbc.com/id/15839069/device/rss/rss.html"),
+        ("FT Markets", "https://www.ft.com/markets?format=rss"),
+        ("CNBC Finance", "https://www.cnbc.com/id/10000664/device/rss/rss.html"),
         ("CNBC Top News", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
-        ("MarketWatch", "http://feeds.marketwatch.com/marketwatch/topstories/"),
     ]),
     ("The economy and interest rates", [
         ("CNBC Economy", "https://www.cnbc.com/id/20910258/device/rss/rss.html"),
         ("Federal Reserve", "https://www.federalreserve.gov/feeds/press_all.xml"),
     ]),
-    ("AI and technology", [
-        ("TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/"),
-        ("The Verge AI", "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),
-    ]),
     ("US news", [
         ("BBC US and Canada", "http://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml"),
         ("NPR", "https://feeds.npr.org/1001/rss.xml"),
     ]),
-    ("World and geopolitics", [
-        ("BBC World", "http://feeds.bbci.co.uk/news/world/rss.xml"),
-    ]),
-    ("Europe and the UK", [
+    ("Europe and the EU", [
+        ("Politico Europe", "https://www.politico.eu/feed/"),
+        ("Euronews", "https://www.euronews.com/rss?level=theme&name=news"),
         ("BBC Europe", "http://feeds.bbci.co.uk/news/world/europe/rss.xml"),
         ("BBC Business", "http://feeds.bbci.co.uk/news/business/rss.xml"),
-        ("BBC Politics", "http://feeds.bbci.co.uk/news/politics/rss.xml"),
     ]),
     ("Ireland", [
         ("RTE News", "https://www.rte.ie/news/rss/news-headlines.xml"),
         ("RTE Business", "https://www.rte.ie/news/rss/business-headlines.xml"),
+        ("Irish Times", "https://www.irishtimes.com/arc/outboundfeeds/feed-irish-news/?outputType=xml"),
+        ("Irish Times Business", "https://www.irishtimes.com/arc/outboundfeeds/feed-business/?outputType=xml"),
+        ("Irish Independent", "https://www.independent.ie/irish-news/rss"),
     ]),
-    ("Asia", [
-        ("CNBC Asia", "https://www.cnbc.com/id/19832390/device/rss/rss.html"),
+    ("AI and software", [
+        ("TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/"),
+        ("The Verge AI", "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),
+        ("Ars Technica AI", "https://arstechnica.com/ai/feed/"),
+        ("MIT Technology Review", "https://www.technologyreview.com/feed/"),
+        ("Hacker News best", "https://hnrss.org/best"),   # where new open-source tools surface first
     ]),
-]
-
-MARKETS = [
-    ("The S&P 500", "^GSPC"), ("The Nasdaq", "^IXIC"), ("The Dow", "^DJI"),
-    ("Gold", "GC=F"), ("Oil", "CL=F"),
-    ("The euro against the dollar", "EURUSD=X"), ("The pound against the dollar", "GBPUSD=X"),
-    ("Japan's Nikkei", "^N225"), ("Hong Kong's Hang Seng", "^HSI"),
+    ("World", [
+        ("BBC World", "http://feeds.bbci.co.uk/news/world/rss.xml"),
+    ]),
 ]
 
 # Routine notices that make dull listening
@@ -127,48 +129,6 @@ def fetch_feed(name, url):
     return stories
 
 
-def fetch_move(name, symbol):
-    """Describe a market move in words; numbers are hard to follow by ear."""
-    try:
-        resp = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-                            headers=UA, timeout=10)
-        resp.raise_for_status()
-        meta = resp.json()["chart"]["result"][0]["meta"]
-        price, prev = meta.get("regularMarketPrice"), meta.get("chartPreviousClose") or meta.get("previousClose")
-        if price is None or not prev:
-            return None
-    except Exception as e:
-        print(f"  [skip] quote {symbol}: {e}", file=sys.stderr)
-        return None
-    pct = (price - prev) / prev * 100
-    if abs(pct) < 0.15:
-        return f"{name} is little changed"
-    size = "slightly" if abs(pct) < 0.5 else "solidly" if abs(pct) < 1.5 else "sharply" if abs(pct) < 3 else "dramatically"
-    return f"{name} is {size} {'higher' if pct > 0 else 'lower'}"
-
-
-def fetch_earnings():
-    """Biggest companies reporting today, from Nasdaq's public calendar (best effort)."""
-    try:
-        resp = requests.get(f"https://api.nasdaq.com/api/calendar/earnings?date={TODAY.isoformat()}",
-                            headers={**UA, "Accept": "application/json"}, timeout=10)
-        resp.raise_for_status()
-        rows = ((resp.json().get("data") or {}).get("rows")) or []
-    except Exception as e:
-        print(f"  [skip] earnings: {e}", file=sys.stderr)
-        return []
-
-    def cap(row):
-        try:
-            return float((row.get("marketCap") or "0").replace("$", "").replace(",", ""))
-        except ValueError:
-            return 0.0
-
-    names = [re.sub(r"[,.]?\s*(Inc|Ltd|Corp|Corporation|Co|plc)\.?$", "", (r.get("name") or r.get("symbol") or "").strip())
-             for r in sorted(rows, key=cap, reverse=True)[:5]]
-    return [n for n in names if n]
-
-
 def gather():
     """Collect everything the script needs, removing stories repeated across feeds."""
     seen, sections = set(), []
@@ -181,15 +141,12 @@ def gather():
                     seen.add(key)
                     stories.append(s)
         sections.append((heading, stories))
-    moves = [m for m in (fetch_move(n, s) for n, s in MARKETS) if m]
     return {"date": f"{TODAY:%A, %B} {TODAY.day}",
-            "moves": moves, "earnings": fetch_earnings(), "sections": sections}
+            "markets": markets.gather_markets(TODAY), "sections": sections}
 
 
 def notes_as_text(notes):
-    lines = [f"Date: {notes['date']}", "", "Market moves: " + "; ".join(notes["moves"])]
-    if notes["earnings"]:
-        lines.append("Reporting earnings today: " + ", ".join(notes["earnings"]))
+    lines = [f"Date: {notes['date']}", "", markets.markets_as_text(notes["markets"])]
     for heading, stories in notes["sections"]:
         lines += ["", f"## {heading}"]
         lines += [f"- {s['title']} ({s['source']}): {s['summary']}" for s in stories] or ["- nothing new"]
@@ -198,11 +155,10 @@ def notes_as_text(notes):
 
 def template_script(notes):
     """Fallback script with no AI: reads headlines out in order."""
-    parts = [f"Good morning. Here's your briefing for {notes['date']}."]
-    if notes["moves"]:
-        parts.append("First, the markets. " + ". ".join(notes["moves"]) + ".")
-    if notes["earnings"]:
-        parts.append("Reporting earnings today: " + ", ".join(notes["earnings"]) + ".")
+    parts = ["Morning Hugh. Here's your market news."]
+    assets = notes["markets"]["assets"]
+    if assets:
+        parts.append(". ".join(markets.spoken_move(a) for a in assets) + ".")
     for heading, stories in notes["sections"]:
         if stories:
             body = " ".join(f"{s['title']}. {s['summary']}".strip() for s in stories)
@@ -211,38 +167,74 @@ def template_script(notes):
     return "\n\n".join(parts)
 
 
+SYSTEM_PROMPT = """\
+You write Hugh's morning briefing. It is read aloud by a text-to-speech voice on his commute, and \
+he works in finance, so it should sound like a sharp colleague on a trading desk talking him \
+through the morning: human, warm, natural rhythm, but direct. No scene-setting, no "grab a \
+coffee", no filler. Open with exactly "Morning Hugh. Here's your market news." and go straight \
+into the numbers.
+
+Markets come first, and they use real numbers: percentage moves for prices, basis points for \
+yields and overnight rates. Each move in the notes has a size in sigma (standard deviations of \
+the past year's daily moves):
+- quiet (under 1 sigma): one short clause, grouped with others, e.g. "Gold up a tenth of a \
+percent, euro-dollar flat."
+- normal (1 to 1.5 sigma): one sentence.
+- NOTABLE (1.5 sigma or more): say it's a big move for that asset, and explain why it happened. \
+Use web search to find the cause; don't guess.
+Then the central banks: the date of the next Fed and ECB decisions and what the market is \
+pricing for each. Fed pricing is in the notes. For the ECB, search for what €STR futures or \
+money markets currently price for the next meeting. Then any US or euro area inflation, GDP, \
+payrolls or unemployment numbers released in the last day or two (check the notes, and search \
+for euro area releases), with the figure against expectations when you can find it.
+
+Then the news, in this order, each with real substance rather than a headline list:
+- Market and business news: deals, earnings, credit, anything moving sectors.
+- US news, then Europe and the EU: politics and policy with economic weight first.
+- Ireland: Hugh is in Dublin, so go into more detail here; the economy, housing, the Budget, \
+industrial relations, big Irish companies and the main home news.
+- AI and software: model releases, big funding or deals, regulation, and any genuinely \
+breakthrough software or open-source release (the kind of thing that changes how people \
+work, like AI decompiling or reverse-engineering software). Search for the biggest AI and \
+open-source developments of the last day or two if the notes look thin.
+- World: a short round-up of anything major.
+Skip trivial, lifestyle or repeated stories. Give each story that matters a line on why it \
+matters.
+
+Rules: never invent a figure, quote or event; anything not in the notes must come from your \
+searches. Write numbers the way they're said aloud ("four point two percent", "eleven basis \
+points", "fifty-one thousand six hundred"). Round index levels sensibly. Output only the spoken \
+script, after you have finished searching: no headings, lists, markdown, citations or stage \
+directions. Separate topics with blank lines. End with one short sign-off line."""
+
+
 def claude_script(notes):
-    """Have Claude turn the notes into a natural spoken script."""
+    """Have Claude write the script, searching the web for the reasons behind big moves."""
     import anthropic
 
-    system = (
-        "You write a personal morning news briefing that is read aloud by a text-to-speech voice "
-        "while the listener commutes to work. Write it the way a good radio presenter speaks: warm, "
-        "plain and conversational, with smooth transitions between stories and a short line of "
-        "context on why each one matters. Use only facts in the notes; never invent figures, quotes "
-        "or events. Describe market moves in words, not numbers. Write numbers, currencies and "
-        "abbreviations the way they should be said aloud. Output plain spoken text only: no "
-        "headings, bullet points, markdown, emoji or stage directions. Separate topics with blank lines."
-    )
-    prompt = (
-        f"Here are today's notes. Write a briefing of about {TARGET_WORDS} words, roughly 10 to 15 "
-        "minutes aloud. Follow the section order in the notes, skip anything trivial or repetitive, "
-        "open with a one-line greeting and the date, and close with a brief sign-off.\n\n"
-        + notes_as_text(notes)
-    )
     client = anthropic.Anthropic()
-    response = client.beta.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=16000,
-        output_config={"effort": "medium"},
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        system=system,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    messages = [{"role": "user", "content": (
+        f"Today's notes. Aim for about {TARGET_WORDS} words in total.\n\n" + notes_as_text(notes))}]
+    for _ in range(5):   # resume if a long search turn pauses
+        response = client.beta.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=16000,
+            output_config={"effort": "medium"},
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            system=SYSTEM_PROMPT,
+            tools=[{"type": "web_search_20260209", "name": "web_search", "max_uses": 8}],
+            messages=messages,
+        )
+        if response.stop_reason != "pause_turn":
+            break
+        messages.append({"role": "assistant", "content": response.content})
     if response.stop_reason == "refusal":
         raise RuntimeError("Claude declined to write the script")
-    text = "".join(b.text for b in response.content if b.type == "text").strip()
+    # The script is the text after the last search result
+    blocks = list(response.content)
+    last_search = max((i for i, b in enumerate(blocks) if b.type.endswith("_tool_result")), default=-1)
+    text = "".join(b.text for b in blocks[last_search + 1:] if b.type == "text").strip()
     if not text:
         raise RuntimeError(f"Claude returned no script (stop_reason={response.stop_reason})")
     return text
